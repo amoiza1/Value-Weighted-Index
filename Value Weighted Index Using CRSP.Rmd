@@ -1,0 +1,144 @@
+---
+title: "VW Index Using CRSP"
+author: "Abdul Moiz"
+date: "April 13, 2019"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(data.table)
+library(fBasics)
+```
+
+## Question 1
+
+```{r}
+PS1_Q1=function(x){
+file=x
+stocks=as.data.table(read.csv(file,stringsAsFactors = FALSE))
+
+stocks=stocks[which(stocks$SHRCD==10 | stocks$SHRCD==11),]
+stocks=stocks[which(stocks$EXCHCD==1 | stocks$EXCHCD==2 | stocks$EXCHCD==3),]
+
+setkey(stocks,PERMNO,date)
+stocks[,mktcap:=abs(PRC)*SHROUT]
+stocks$date=as.Date(strptime(stocks$date,format='%Y%m%d'))
+
+stocks[,mktcap.lag:=shift(mktcap),by=PERMNO]
+stocks[,mktcaptotal.lag:=sum(na.omit(mktcap.lag)),by=date]
+
+
+data=stocks
+
+data=data[complete.cases(data[, c('mktcap.lag','mktcaptotal.lag')])]
+data[,weight:=mktcap.lag/mktcaptotal.lag]
+
+data[RET==NA | RET=='',cumret:=DLRET]
+data[DLRET==NA | DLRET=='',cumret:=RET]
+data[RET!=NA & DLRET!=NA,cumret:=(1+RET)*(1+DLRET)-1]
+
+cols='cumret'
+data[, (cols) := lapply(.SD,as.double),.SDcols=cols]
+
+data[,vwretd:=weight*as.double(cumret)]
+
+value.returns=data[,sum(na.omit(vwretd)),by=date]
+equal.returns=data[,mean(na.omit(cumret)),by=date]
+mktcap=data[,mean(mktcaptotal.lag),by=date]
+
+comb=merge(value.returns,equal.returns,by='date')
+comb=merge(comb,mktcap,by='date')
+
+setnames(comb,"V1.x","Stock_Vw_Ret")
+setnames(comb,"V1.y","Stock_Ew_Ret")
+setnames(comb,"V1","Stock_lag_MV")
+comb[,Year:=year(date)]
+comb[,month:=month(date)]
+comb[,key:=paste(Year,month)]
+return(comb)
+}
+
+data=PS1_Q1('crsp.csv')
+
+print(data)
+
+```
+
+## Question 2
+
+```{r}
+PS1_Q2=function(data,y){  #data is the output of Q1
+
+filename=y
+library(readr)
+FF_mkt=as.data.table(read_csv(filename,col_types = cols(X1 = col_date(format = "%Y%m"))))
+setnames(FF_mkt,"X1","date")
+setkey(FF_mkt,date)
+FF_mkt[,Year:=year(date)]
+FF_mkt[,month:=month(date)]
+FF_mkt[,key:=paste(Year,month)]
+FF_mkt[,`Mkt-RF`:=`Mkt-RF`/100]
+FF_mkt[,SMB:=SMB/100]
+FF_mkt[,HML:=HML/100]
+FF_mkt[,RF:=RF/100]
+
+rf=FF_mkt[,list(RF),by=key]
+
+comb.rf=merge(data,rf,by='key')
+comb.rf[,Market_minus_Rf:=`Stock_Vw_Ret`-RF]
+
+mean(FF_mkt$`Mkt-RF`)*12
+
+
+x=c(mean(comb.rf$Market_minus_Rf)*12,sd(comb.rf$Market_minus_Rf)*sqrt(12),(mean(comb.rf$Market_minus_Rf)*12)/(sd(comb.rf$Market_minus_Rf)*12),skewness(comb.rf$Market_minus_Rf),kurtosis(comb.rf$Market_minus_Rf))
+y=c(mean(FF_mkt$`Mkt-RF`)*12,sd(FF_mkt$`Mkt-RF`)*sqrt(12),(mean(FF_mkt$`Mkt-RF`)*12)/(sd(FF_mkt$`Mkt-RF`)*12),skewness(FF_mkt$`Mkt-RF`),kurtosis(FF_mkt$`Mkt-RF`))
+
+summ=data.frame(x,y)
+colnames(summ)=c("Replication","French's")
+rownames(summ)=c("Annualized Mean","Annualized Standard Deviation","Annualized Sharpe Ratio","Excess Skewness","Kurtosis")
+return(summ)
+}
+
+mat=PS1_Q2(data,'F-F_Research_Data_Factors.csv')
+mat
+```
+
+## Question 3
+
+```{r}
+PS1_Q3=function(data,y){
+
+  #From Part 2
+filename=y
+library(readr)
+FF_mkt=as.data.table(read_csv(filename,col_types = cols(X1 = col_date(format = "%Y%m"))))
+setnames(FF_mkt,"X1","date")
+setkey(FF_mkt,date)
+FF_mkt[,Year:=year(date)]
+FF_mkt[,month:=month(date)]
+FF_mkt[,key:=paste(Year,month)]
+FF_mkt[,`Mkt-RF`:=`Mkt-RF`/100]
+FF_mkt[,SMB:=SMB/100]
+FF_mkt[,HML:=HML/100]
+FF_mkt[,RF:=RF/100]
+
+rf=FF_mkt[,list(RF),by=key]
+
+comb.rf=merge(data,rf,by='key')
+comb.rf[,Market_minus_Rf:=`Stock_Vw_Ret`-RF]
+#----------------------
+  
+comparison=merge(comb.rf,FF_mkt,by='key')
+corr=cor(comparison$Market_minus_Rf,comparison$`Mkt-RF`)
+comparison[,diff:=comparison$Market_minus_Rf-comparison$`Mkt-RF`]
+abs=comparison$diff[which.max(abs(comparison$diff))]
+
+keystat=data.frame(corr,abs)
+colnames(keystat)=c("Correlation","Maximum Absolute Difference")
+return(keystat)
+}
+stat=PS1_Q3(data,'F-F_Research_Data_Factors.csv')
+stat
+```
+
